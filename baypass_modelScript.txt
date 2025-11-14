@@ -1,0 +1,20 @@
+############## BayPass
+### first, we need input files for BayPass
+### we can create those using the sync files with our pops of interest
+### do one chr at a time
+### in R
+### check poolfstat manual for details
+
+library(poolfstat)
+
+pool = popsync2pooldata("popsofinterest.sync",poolsizes=rep(50, 48), min.rc = 5, min.maf = 0.05)
+
+pooldata2genobaypass(pool, writing.dir = getwd())
+
+
+
+### bash
+### run BayPass
+### see BayPass manual for details on parameters
+### this will output the files needed for the PCA (the omega matrix), the mapping output (the *summary_betai_reg.out file) and the XtX stats (the *summary_pi_xtx.out file)
+PATH_TO/baypass_2.4/sources/g_baypass -npop 48 -gfile popsofinterest.genobaypass -poolsizefile popsofinterest.poolsize -d0yij 10 -efile survival.efile -outprefix popsofinterest.survival.spearman.out -nthreads 80

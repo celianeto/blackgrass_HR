@@ -1,0 +1,66 @@
+##############
+############## always create your own folders and organize them 
+############## no paths to folders of input or output files are shown here
+############## these will create outputs that need further proccessing in R 
+##############
+
+
+
+############## Treemix
+### first we need to create a genobaypass file
+### we can create those using the sync files with our pops of interest
+### do one chr at a time
+### in R
+### check poolfstat manual for details
+
+library(poolfstat)
+
+pool = popsync2pooldata("popsofinterest.sync",poolsizes=rep(50, 64))
+
+pooldata2genobaypass(pool, writing.dir = getwd())
+
+
+### in terminal
+### merge all genobaypass files 
+cat popsofinterest.chr1.genobaypass popsofinterest.chr2.genobaypass popsofinterest.chr3.genobaypass popsofinterest.chrn.genobaypass > popsofinterest.allchrs.genobaypass
+
+### replace space between alleles from same ind with comma
+awk '{printf $1","$2;for(i=3; i<=NF;i+=2){printf " %s",$i","$(i+1)}print out}' popsofinterest.allchrs.genobaypass > popsofinterest.allchrs.genobaypass.comma
+
+### add first line with pop name
+echo "HERE BETWEEN QUOTES YOUR POP NAMES IN THE SAME ORDER AS IN THE GENOBAYPASS FILE SEPARATED BY SPACES" | cat - popsofinterest.allchrs.genobaypass.comma > popsofinterest.allchrs.genobaypass.comma_
+
+### remove markers with missing data, which here look like 0,0
+sed -i '/0,0/d' popsofinterest.allchrs.genobaypass.comma_ > popsofinterest.allchrs.genobaypass.commad_clean
+
+### gunzip file to input in treemix 
+gzip popsofinterest.allchrs.genobaypass.comma_clean popsofinterest.allchrs.genobaypass.comma_clean.gz
+
+### now run Treemix 
+treemix -i popsofinterest.allchrs.genobaypass.comma_clean.gz -k 1000 -o treemix$i 
+
+
+
+############## npstat
+### in terminal
+### run for each pop, per chr; change SAMPLENAME1 per pop and chrn per chr
+### all paths need to be edited
+### -n refers to the number of haploids in the pool 
+### -l refers to the window size
+PATH_TO_/npstat-master/npstat -n 50 -l 1000000 -minqual 20 -outgroup PATH_TO_REF/ref.chrn.fasta SAMPLENAME1.chrn.mpileup > SAMPLENAME1.chrn.1M.stats
+
+
+
+############## Fst
+### in R
+### see poolfstat manual for details
+
+library(poolfstat)
+
+pool = popsync2pooldata("popsofinterest.sync",poolsizes=rep(50,64), min.rc = 5, min.maf = 0.05)
+
+# Fst between all pops
+pool.fst.window <- computeFST(pool,sliding.window.size=10000)
+
+# pairwise Fst
+pool.fst.pw <- compute.pairwiseFST(pool, verbose=FALSE)
