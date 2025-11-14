@@ -1,0 +1,963 @@
+---
+title: "HR"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#setwd("Desktop/HR/")
+```
+
+
+## 0. Load libraries, custom functions, colors
+
+
+```{r before start, echo=FALSE, warning=FALSE, message=FALSE}
+
+superbloom3 = c("#E69512", "#D3105C", "#3B4F8E", "#3A5D3D", "#4C4976", "#6C91BD")
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+
+library(dplyr)
+library(leaflet)
+library(gstat)
+library(ggplot2)
+library(stringr)
+library(viridis)
+library(vegan)
+library(reshape2)
+library(geosphere)
+library(sf)
+library(raster)
+library(stars)
+library(ggforce)
+library(ggpubr)
+library(ape)
+library(adegenet)
+library(data.table)
+library(picante)
+library(caret)
+library(ggpmisc)
+
+
+
+
+
+
+
+fg <- function(model, x, crs, ...) {
+     v <- st_as_sf(x, coords=c("x", "y"), crs=crs)
+     p <- predict(model, v, ...)
+     # right now you need to cbind the coordinates; that I can fix
+     cbind(x, as.data.frame(p)[,1:2])
+}
+
+###############################################
+###function: Plot Omega after spectral decomposition: Omega=UDU' with D=diagonal matrix of singular values
+##############################################
+plot.omega <- function(omega,PC=c(1,2),pop.names=paste0("Pop",1:nrow(omega)),main=expression("SVD of "*Omega),col=rainbow(nrow(omega)),pch=16,pos=2,cex=8){
+ om.svd=svd(omega)
+ eig=om.svd$d
+ pcent.var=100*eig/sum(eig)
+ plot(om.svd$u[,PC],main=main,pch=pch,col=col,cex=cex,
+      xlab=paste0("PC",PC[1]," (",round(pcent.var[PC[1]],2),"%)"),
+      ylab=paste0("PC",PC[2]," (",round(pcent.var[PC[2]],2),"%)")
+      )
+ text(om.svd$u[,PC[1]],om.svd$u[,PC[2]],pop.names,col=col,pos=pos)
+ list(PC=om.svd$u,eig=eig,pcent.var=pcent.var)
+}
+
+
+
+```
+
+
+# Figure 1 + Supp Fig 1
+
+
+```{r}
+
+## map
+world_map <- map_data("world")
+europe_map <- world_map[world_map$long > -10 & world_map$long < 70 & world_map$lat > 30 & world_map$lat < 70,]
+
+
+## phenotype
+survival180 = read.table("survival180pops_augustin", header = TRUE, comment.char = "?")
+
+
+## plotting map
+ggplot() + 
+  geom_polygon(data = europe_map, aes(x=long, y=lat, group=group),
+                color="grey80", fill="grey80" ) + theme_bw() +
+  geom_tile(data = na.omit(interpdf), aes(x = x, y = y, z = z, fill = z), alpha = 0.3) +
+  geom_point(data = na.omit(survival180), aes(x = Long, y = Lat, colour = Survival, shape = Cluster), size = 2) +
+  geom_point(data = na.omit(survival180)[survival180$Pop %in% acc_geno$pop,], aes(x = Long, y = Lat, shape = Cluster, fill = Survival), size = 3, colour = "grey20", alpha = 0.7) +
+  xlab("Longitude") + ylab("Latitude") +
+  xlim(-10, 70) + ylim(30, 70) +
+  scale_color_gradientn(colours = cbPalette[c(4,5,2,7)]) +
+  scale_fill_gradientn(colours = cbPalette[c(4,5,2,7)], "Survival") +
+  scale_shape_manual(values = c(24,23,21,22)) +
+  theme(legend.position = "none")
+
+
+## plotting pheno distr
+ggplot(na.omit(survival180), aes(Survival)) + geom_histogram(binwidth = 0.1) + theme_bw() 
+
+
+## edits
+survival180$group <- survival180$Cluster
+survival180$group <- gsub(pattern = "Non-Native_Contemporary", replacement = "European contemporary", x = survival180$group)
+survival180$group <- gsub(pattern = "Native_Contemporary", replacement = "Middle Eastern contemporary", x = survival180$group)
+survival180$group <- gsub(pattern = "Non-Native_Past", replacement = "European historical", x = survival180$group)
+survival180$group <- gsub(pattern = "Native_Past", replacement = "Middle Eastern historical", x = survival180$group)
+
+
+## plotting boxplot per cluster
+ggplot(data = na.omit(survival180), aes(x = factor(x = group, levels = c("Middle Eastern historical", "European historical", "Middle Eastern contemporary", "European contemporary")), y = Survival)) + 
+  geom_boxplot(data = na.omit(survival180), aes(x = factor(x = group, levels = c("Middle Eastern historical", "European historical", "Middle Eastern contemporary", "European contemporary")), y = Survival), outlier.colour = NA) + 
+  geom_point(data = na.omit(survival180), aes(x = factor(x = group, levels = c("Middle Eastern historical", "European historical", "Middle Eastern contemporary", "European contemporary")), y = Survival, colour = Survival, shape = group), size = 2, position=position_jitterdodge()) + 
+    geom_point(data = na.omit(survival180[survival180$Pop %in% acc_geno$pop,]), aes(x = factor(x = group, levels = c("Middle Eastern historical", "European historical", "Middle Eastern contemporary", "European contemporary")), y = Survival, fill = Survival, shape = group), size = 2, position=position_jitterdodge(), alpha = 0.7) + 
+  
+    theme_bw() + theme(axis.title.x = element_blank(), legend.position = "none") +
+  stat_compare_means(comparisons = list(c("Middle Eastern contemporary", "Middle Eastern historical"), c("Middle Eastern contemporary", "European contemporary"), c("European contemporary", "European historical"), c("Middle Eastern historical", "European historical")), method = "wilcox", label.y = c(0.6, 1.05, 1.15, 0.1, 1.25)) +
+  #scale_color_manual(values = cbPalette[c(4,5,2,7)], "Resistance") +
+    scale_color_gradientn(colours = cbPalette[c(4,5,2,7)]) +
+    scale_fill_gradientn(colours = cbPalette[c(4,5,2,7)]) +
+
+  scale_shape_manual(values = c(21,22,24,23)) +
+  theme(axis.text.x = element_text(angle = 0, vjust = 0.5, hjust = 0.5)) +
+  scale_x_discrete(labels = c(
+    "Middle Eastern historical" = "Middle Eastern\nhistorical",
+    "European historical" = "European\nhistorical",
+    "Middle Eastern contemporary" = "Middle Eastern\ncontemporary",
+    "European contemporary" = "European\ncontemporary"
+  )) + ylim(0, 1.3)
+
+
+## stats
+print("Proportion of pops with survival greater than 0.8")
+nrow(na.omit(survival180[survival180$Survival > 0.8,])) / nrow(na.omit(survival180))
+print("Proportion of pops with survival less than 0.2")
+nrow(na.omit(survival180[survival180$Survival < 0.2,])) / nrow(na.omit(survival180))
+
+na.omit(survival180) %>% group_by(Cluster) %>% summarise(mean = mean(Survival))
+
+
+```
+
+
+# Figure 2A + Supp Fig 2A
+
+
+```{r}
+
+## data
+acc_geno = read.table("selected_ACCase_pos.txt", header = T, comment.char = "")
+
+
+## edits
+pallete <- colorFactor(palette = c(cbPalette[c(4,5,2,3,6,7)], "white", cbPalette[8], superbloom3[2]),
+                      domain = acc_geno$Mutation)
+
+
+acc_geno$lat_jitter <- jitter(acc_geno$Lat, factor = 0.5)
+acc_geno$long_jitter <- jitter(acc_geno$Long, factor = 0.5)
+
+
+## plotting maps
+acc_geno <- acc_geno %>%
+    mutate(Mutation = forcats::fct_infreq(Mutation))
+
+ggplot() + 
+    geom_polygon(data = europe_map, aes(x=long, y=lat, group=group),
+                 color="grey80", fill="grey80" ) + theme_bw() +
+    
+    xlab("Longitude") + ylab("Latitude") +
+    xlim(-10, 70) + ylim(30, 70) +
+    scale_shape_manual(values = c(0:5,6,8)) +
+
+    geom_mark_ellipse(data = acc_geno[acc_geno$Mutation != "none" & acc_geno$Mutation != "Trp1999Leu",], aes(x = long_jitter, y = lat_jitter, fill = Mutation), colour = NA,expand = c(0.002), alpha = 0.5) +
+    geom_point(data = acc_geno[acc_geno$Mutation != "none" & acc_geno$Mutation != "Trp1999Leu",], aes(x = long_jitter, y = lat_jitter, shape = Mutation, size = as.numeric(Freq))) +
+    geom_point(data = acc_geno[acc_geno$Mutation == "none" & acc_geno$Mutation != "Trp1999Leu",], aes(x = long_jitter, y = lat_jitter)) +
+    
+    scale_fill_manual(values = c(cbPalette[c(4,5,2,3,6,7)], cbPalette[8], superbloom3[2]))  + facet_wrap(.~ Mutation, ncol = 4) + labs(size = "Frequency") + theme(legend.position = "bottom") + guides(fill = "none", shape = "none")
+
+
+## plotting density
+ggplot() +
+  geom_polygon(data = europe_map, aes(x=long, y=lat, group=group),
+                color="grey80", fill="grey80" ) + theme_bw() +
+  stat_density_2d(data = acc_geno[acc_geno$Mutation != "none",] %>% distinct(Mutation, Lat, Long), #%>% summarise(Lat = round(Lat, 1), Long = round(Long, 1), Mutation = Mutation), 
+                  aes(x = Long, y = Lat, fill = ..level..), alpha = 0.5, geom = "polygon", bins = 10) +
+  geom_point(data = acc_geno[acc_geno$Mutation != "none",], aes(x = long_jitter, y = lat_jitter, shape = Mutation)) +
+  scale_shape_manual(values = c(0:5,16,6,8)) +
+  #scale_color_manual(values = c(cbPalette[c(4,5,2,3,6,7)], "white", cbPalette[8], superbloom3[2])) +
+  xlab("Longitude") + ylab("Latitude") +
+  xlim(-10, 30) + ylim(30, 70) +
+  scale_fill_viridis_b() +
+  theme(legend.position = "none")
+
+
+```
+
+
+# Figure 2B + Supp Fig 2B and 2C
+
+
+```{r}
+
+source('/Users/kqw596/Downloads/treemix-1.13/src/plotting_funcs.R') ## from treemix download
+
+### all 64
+MyTree <- read.tree("treemix_64_ACCAse/tree_m0.txt")
+MyTree<-ladderize(MyTree) 
+MyTree$tip.label ## to get the order of the pops for plotting with colours
+labssss = data.frame(pop = MyTree$tip.label)
+labssss$order <- 1:nrow(labssss)
+labss <- fread("../../labs_65")
+labssss = merge(labssss, labss, by.x = "pop", by.y = "V1")
+labssss = labssss[order(labssss$order),]
+
+# draw an unrooted tree + the residuals in a file
+plot.phylo(MyTree, type="fan", no.margin=T, show.tip.label=T)
+
+
+## Supp Fg 2B
+plot.phylo(MyTree, type="fan", no.margin=T, show.tip.label=F)
+tiplabels(pch=labssss$V3,col=labssss$V4, cex=2)
+
+
+## with AF 
+plot.phylo(MyTree, type="fan", no.margin=T, show.tip.label=F)
+tiplabels(pch=labssss$V3,col=labssss$V25, cex=2) #### replace V25 by mutation of interest
+
+
+### stats -- mean pairwise distance
+# Define populations with mutations
+mut1_pops <- c("Am_88", "Am_86", "Am_72", "Am_73", "Am_52")  # Trp2027Cys
+mut2_pops <- c("Am_166", "Am_17", "Am_3", "Am_40", "Am_45") # Asp2078Gly
+mut3_pops <- c("Am_76", "Am_97", "Am_46", "Am_61", "Am_28", "Am_51", "Am_40", "Am_85", "Am_75", "Am_6", "Am_31", "Am_17", "Am_88", "Am_2", "Am_89", "Am_173", "Am_39") # Ile Leu
+mut4_pops <- c("Am_46", "Am_28", "Am_51", "Am_85", "Am_75", "Am_6", "Am_31", "Am_88", "Am_2", "Am_89") # Ile Leu clustered
+mut5_pops <- c("Am_61", "Am_75")  # Ile1781Thr
+mut6_pops <- c("Am_39", "Am_43", "Am_45") #Ile 1781 Val
+mut7_pops <- c("Am_28", "Am_6", "Am_3") #Gly 2096 Ala
+mut8_pops <- c("Am_88", "Am_106", "Am_63", "Am_73", "Am_53", "Am_3", "Am_41") #Ile 2041 Asn
+
+
+#Function to compute Mean Pairwise Distance (MPD)
+compute_mpd <- function(tree, pops) {
+  dist_mat <- cophenetic.phylo(tree)
+  sub_dist <- dist_mat[pops, pops]
+  mean(sub_dist[lower.tri(sub_dist)])
+}
+
+# Compute observed MPDs
+mpd1_obs <- compute_mpd(tree, mut1_pops)
+mpd2_obs <- compute_mpd(tree, mut2_pops)
+mpd3_obs <- compute_mpd(tree, mut3_pops)
+mpd4_obs <- compute_mpd(tree, mut4_pops)
+mpd5_obs <- compute_mpd(tree, mut5_pops)
+mpd6_obs <- compute_mpd(tree, mut6_pops)
+mpd7_obs <- compute_mpd(tree, mut7_pops)
+mpd8_obs <- compute_mpd(tree, mut8_pops)
+
+
+# Permutation test
+perm_test <- function(tree, pops, n_permutations = 10000) {
+  all_tips <- tree$tip.label
+  n <- length(pops)
+  null_mpd <- replicate(n_permutations, {
+    sampled <- sample(all_tips, n)
+    compute_mpd(tree, sampled)
+  })
+  obs_mpd <- compute_mpd(tree, pops)
+  p_value <- mean(null_mpd <= obs_mpd)  # one-sided: testing for clustering
+  list(obs = obs_mpd, null = null_mpd, p = p_value)
+}
+
+# Run tests
+res1 <- perm_test(tree, mut1_pops)
+res2 <- perm_test(tree, mut2_pops)
+res3 <- perm_test(tree, mut3_pops)
+res4 <- perm_test(tree, mut4_pops)
+res5 <- perm_test(tree, mut5_pops)
+res6 <- perm_test(tree, mut6_pops)
+res7 <- perm_test(tree, mut7_pops)
+res8 <- perm_test(tree, mut8_pops)
+
+# Results
+cat("Mutation 1 (Trp2027Cys): MPD =", res1$obs, "p =", res1$p, "\n")
+cat("Mutation 2 (Asp2078Gly): MPD =", res2$obs, "p =", res2$p, "\n")
+cat("Mutation 3 (Ile1781Leu): MPD =", res3$obs, "p =", res3$p, "\n")
+cat("Mutation 4 (Ile1781Leu clustered): MPD =", res4$obs, "p =", res4$p, "\n")
+cat("Mutation 5 (Ile1781Thr): MPD =", res5$obs, "p =", res5$p, "\n")
+cat("Mutation 6 (Ile1781Val): MPD =", res6$obs, "p =", res6$p, "\n")
+cat("Mutation 7 (Gly2096Ala): MPD =", res7$obs, "p =", res7$p, "\n")
+cat("Mutation 8 (Ile2041Asn): MPD =", res8$obs, "p =", res8$p, "\n")
+
+
+```
+
+
+# Supp Fig 3
+
+
+```{r}
+
+## load output from BayPass
+
+omega1 = read.table("baypass/HR48.chr1.new.survival.spearman.out_mat_omega.out", header = FALSE)
+omega2 = read.table("baypass/HR48.chr2.new.survival.spearman.out_mat_omega.out", header = FALSE)
+omega3 = read.table("baypass/HR48.chr3.new.survival.spearman.out_mat_omega.out", header = FALSE)
+omega4 = read.table("baypass/HR48.chr4.new.survival.spearman.out_mat_omega.out", header = FALSE)
+omega5 = read.table("baypass/HR48.chr5.new.survival.spearman.out_mat_omega.out", header = FALSE)
+omega6 = read.table("baypass/HR48.chr6.new.survival.spearman.out_mat_omega.out", header = FALSE)
+omega7 = read.table("baypass/HR48.chr7.new.survival.spearman.out_mat_omega.out", header = FALSE)
+
+x = list(omega3, omega4, omega5, omega6, omega7)
+v = Reduce(`+`, x) / length(x)
+
+labs = read.table("../PopGen/final/labsFile.txt", header = FALSE)
+
+hr48 = data.frame(order = 1:48,
+                  pop = c("Am_76", "Am_97", "Am_22", "Am_46", "Am_61", "Am_135", "Am_28", "Am_1", "Am_26", "Am_52", "Am_51", "Am_40", "Am_136", "Am_85", "Am_114", "Am_67", "Am_39", "Am_73", "Am_53", "Am_75", "Am_55", "Am_6", "Am_31", "Am_117", "Am_150", "Am_36", "Am_25", "Am_37", "Am_72", "Am_88", "Am_33", "Am_41", "Am_63", "Am_86", "Am_151", "Am_2", "Am_156", "Am_89", "Am_45", "Am_43", "Am_3", "Am_173", "Am_166", "Am_165", "Am_16", "Am_158", "Am_106", "Am_62"))
+hr48 = merge(hr48, acc_geno)
+
+
+vpca = as.data.frame(plot.omega(v)$PC)
+
+vpca$pop <- c("Am_76", "Am_97", "Am_22", "Am_46", "Am_61", "Am_135", "Am_28", "Am_1", "Am_26", "Am_52", "Am_51", "Am_40", "Am_136", "Am_85", "Am_114", "Am_67", "Am_39", "Am_73", "Am_53", "Am_75", "Am_55", "Am_6", "Am_31", "Am_117", "Am_150", "Am_36", "Am_25", "Am_37", "Am_72", "Am_88", "Am_33", "Am_41", "Am_63", "Am_86", "Am_151", "Am_2", "Am_156", "Am_89", "Am_45", "Am_43", "Am_3", "Am_173", "Am_166", "Am_165", "Am_16", "Am_158", "Am_106", "Am_62")
+vpca$country = c("Germany", "UK", "Belgium", "Spain", "Netherlands", "CzechRepublic", "Denmark", "Lithuania", "Austria", "Luxembourg", "Luxembourg", "Italy", "CzechRepublic", "Germany", "Am_39", "Poland", "Italy", "Germany", "Switzerland", "Germany", "Netherlands", "France", "Denmark", "UK", "CzechRepublic", "Switzerland", "Austria", "Italy", "Poland", "UK", "Switzerland", "Italy", "Poland", "Germany", "Italy", "France", "Italy", "UK", "Spain", "Spain", "France", "Sweden", "Sweden", "Denmark", "France", "Denmark", "UK", "Netherlands")
+vpca = merge(vpca, hr48[!duplicated(hr48[, 1:3]),], by = "pop", all.x = TRUE)
+
+
+## plotting PCA
+ggplot(vpca, aes(x = V1, y = V2, colour = Survival)) + geom_text(aes(label = country)) +
+  theme_bw() + #theme(legend.position = "none") +
+  #theme(panel.border = element_rect(colour = "black", fill=NA, size=1)) +
+  scale_colour_gradientn(colours = cbPalette[c(4,5,7)]) +
+  #scale_colour_viridis("Proportion of survival") +
+  xlab("PC1 (79.62%)") + ylab("PC2 (2.58%)") + xlim(-0.147, -0.142)
+
+
+```
+
+
+# Figure 4
+
+
+```{r}
+### output from the local score -- all SNPs 
+chr1 = fread("lindley_chr1_survival.new.HR48_spearman_Xi5.txt", header = TRUE)
+chr3 = fread("lindley_chr3_survival.new.HR48_spearman_Xi5.txt", header = TRUE)
+chr2 = fread("lindley_chr2_survival.new.HR48_spearman_Xi5.txt", header = TRUE)
+chr5 = fread("lindley_chr5_survival.new.HR48_spearman_Xi5.txt", header = TRUE)
+chr4 = fread("lindley_chr4_survival.new.HR48_spearman_Xi5.txt", header = TRUE)
+chr6 = fread("lindley_chr6_survival.new.HR48_spearman_Xi5.txt", header = TRUE)
+chr7 = fread("lindley_chr7_survival.new.HR48_spearman_Xi5.txt", header = TRUE)
+
+chrs = rbind(chr4[, c(1,2,7)], chr5[, c(1,2,7)], chr6[, c(1,2,7)], chr2[, c(1,2,7)], chr3[, c(1,2,7)], chr7[, c(1,2,7)], chr1[, c(1,2,7)])
+
+
+#### output from the local score -- identification of significant zones
+sig1 = read.table("sigZones_chr1_survival.new.HR48_spearman_Xi5.txt", header = TRUE)
+sig2 = read.table("sigZones_chr2_survival.new.HR48_spearman_Xi5.txt", header = TRUE)
+sig3 = read.table("sigZones_chr3_survival.new.HR48_spearman_Xi5.txt", header = TRUE)
+sig4 = read.table("sigZones_chr4_survival.new.HR48_spearman_Xi5.txt", header = TRUE)
+sig5 = read.table("sigZones_chr5_survival.new.HR48_spearman_Xi5.txt", header = TRUE)
+sig6 = read.table("sigZones_chr6_survival.new.HR48_spearman_Xi5.txt", header = TRUE)
+sig7 = read.table("sigZones_chr7_survival.new.HR48_spearman_Xi5.txt", header = TRUE)
+
+sigs = rbind(sig2, sig3, sig4, sig5, sig6, sig7, sig1)
+
+## OR
+sigZones = fread("sigZones_allChrs_posProcessed.txt", header = TRUE)
+
+
+## plotting
+ggplot(chrs, aes(x=pos, y = lindley)) + geom_point() + facet_grid(.~ chr, scales = "free") +
+  theme_classic() + theme(axis.title = element_blank(), axis.ticks.x = element_blank(), axis.text.x = element_blank()) +
+  geom_vline(xintercept = sigs$beg)
+
+
+```
+
+
+
+# Supp Fig 4
+
+
+```{r}
+## allele freqs 
+af1 = read.table("../../af_QTL_HR_65pops_chr1.txt", header = FALSE)
+af2 = read.table("../../af_QTL_HR_65pops_chr2.txt", header = FALSE)
+af3 = read.table("../../af_QTL_HR_65pops_chr3.txt", header = FALSE)
+af4 = read.table("../../af_QTL_HR_65pops_chr4.txt", header = FALSE)
+af5 = read.table("../../af_QTL_HR_65pops_chr5.txt", header = FALSE)
+af6 = read.table("../../af_QTL_HR_65pops_chr6.txt", header = FALSE)
+af7 = read.table("../../af_QTL_HR_65pops_chr7.txt", header = FALSE)
+
+af = rbind(af1, af2, af3, af4, af5, af6, af7)
+colnames(af) <- c("Chr", "pos", "A1", "A2", "Am_76", "Am_97", "Am_22", "Am_46", "Am_61", "Am_135", "Am_28", "Am_1", "Am_26", "Am_52", "Am_51", "Am_40", "Am_136", "Am_85", "Am_114", "Am_67", "Am_39", "Am_73", "Am_53", "Am_121", "Am_75", "Am_55", "Am_6", "Am_31", "Am_50", "Am_17", "Am_150", "Am_36", "Am_25", "Am_37", "Am_72", "Am_88", "Am_33", "Am_41", "Am_63", "Am_86", "Am_151", "Am_2", "Am_156", "Am_89", "Am_45", "Am_43", "Am_189", "Am_188", "Am_186", "Am_184", "Am_183", "Am_182", "Am_181", "Am_180", "Am_179", "Am_3", "Am_178", "Am_177", "Am_176", "Am_173", "Am_166", "Am_165", "Am_16", "Am_158", "Am_125", "Am_118", "Am_106", "Am_62")
+
+## if af is NA, that means there was no coverage so I'm proxying that with 0
+af[is.na(af)] <- 0
+taf = t(af[, -c(1:4,69)])
+
+taf = as.data.frame(taf)
+taf$pop <- rownames(taf)
+colnames(taf) <- c(af$pos, "pop")
+taf = merge(taf, survival180[,1:3], by.x = "pop", by.y = "Pop")
+taf = taf %>% arrange(factor(Cluster, levels = c("Non-Native_Contemporary", "Non-Native_Past", "Native_Contemporary", "Native_Past")))
+
+
+## run the model 100 times, and take 10 random pops from the 48 to train; each run, 10 different pops
+df <- data.frame()
+df <- replicate(100, { 
+  
+
+index = c(sample(1:48, 10, replace = FALSE))
+trainset = as.data.frame(na.omit(taf[index,]))
+predictset = na.omit(taf)
+predictset = predictset[-index,]
+
+# Build a predictive model for survival
+train_control <- trainControl(method = 'boot', number = 1000)
+model_surv <- train(Survival ~ ., data = trainset[, -c(1,79)], method = "bayesglm")
+
+predictions_super_surv <- predict(object = model_surv, newdata = predictset[, -c(1,78,79)], type = "raw")
+predictions_super_surv
+
+predictset$predicted <- predictions_super_surv
+
+}, simplify = FALSE)
+
+df <- bind_rows(df)
+
+dff <- df[, c("Survival", "predicted")]
+dfff <- dff %>% group_by(Survival) %>%
+  summarise(median = median(predicted),
+            sd = sd(predicted))
+
+
+## plotting 
+ggplot(data = dfff, aes(x = Survival, y = median)) + 
+  geom_point(data = dfff, aes(x = Survival, y = median)) +
+  geom_errorbar(data = dfff, aes(x = Survival, ymin = median-sd, ymax = median+sd)) +
+  geom_abline(intercept = 0, slope = 1, linetype = 2, colour = "grey") +
+  theme_classic() + xlim(0,1) + ylim(-0.1,1.1) +
+  stat_cor(method = "spearman") + stat_smooth(method = "lm", se = FALSE, colour = "red") +
+  xlab("Observed survival") + ylab("Predicted survival") +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.25))
+
+
+```
+
+
+# Supp Fig 5
+
+
+```{r}
+## median AF per SNP and pop
+af_melt = reshape2::melt(af, id.vars = list("Chr", "pos", "A1", "A2"))
+
+af_melt = merge(af_melt, pops_all, by.x = "variable", by.y = "Pop")
+af_melt = merge(af_melt, survival180[, 1:2], by.x = "variable", by.y = "Pop")
+
+af_melt_median = af_melt %>%
+  group_by(pos) %>%
+  summarise(median = median(value_alt))
+
+af_melt_median = merge(af_melt_median, af_melt[, c("pos", "Beta_is")], by = "pos")
+af_melt_median = unique(af_melt_median)
+
+## plotting 
+ggplot(af_melt_median, aes(x = median, y = abs(Beta_is))) + geom_point() +
+  stat_smooth(method = "lm") + stat_cor(method = "spearman") +
+  theme_bw() + xlab("Median allele frequency of the alternative allele") +
+   ylab("Absolute effect size")
+
+
+```
+
+
+# Supp Fig 6
+
+
+```{r}
+## plotting
+ggplot(af_melt[af_melt$Cluster == "InvasiveContemporary",],
+       aes(x = value_alt, fill = abs(Beta_is), group = pos)) + geom_histogram() +
+  scale_fill_gradientn(colours = rainbow(10)[1:8], "abs(effect size)") +
+  facet_wrap(.~ pos, ncol = 7) + xlab("Alternative allele frequency") +
+  theme_bw() + theme(strip.background = element_blank(),
+                      strip.text = element_blank()) 
+
+```
+
+
+# Supp Fig 7
+
+
+```{r}
+## plotting
+ggplot() + 
+  geom_polygon(data = europe_map, aes(x=long, y=lat, group=group),
+               color="grey80", fill="grey80" ) +
+  geom_point(data = af_melt, 
+             aes(x = Long, y = Lat, colour = (value_alt))) +
+  facet_wrap(.~ pos, ncol = 7) +
+  scale_colour_gradientn(colours= rainbow(10)[1:8], "Allele freq") +
+  theme_bw() + xlim(-10, 40) + 
+  xlab("Longitude") + ylab("Latitude") + 
+  theme(strip.background = element_blank(),
+                                     strip.text = element_blank()) 
+
+```
+
+
+# Figure 3A
+
+
+```{r}
+## plotting
+ploty = c(42357470, 30547514, 83578360, 88495933, 76569455, 138360385)
+
+ggplot() + 
+  geom_polygon(data = europe_map, aes(x=long, y=lat, group=group),
+               color="grey80", fill="grey80" ) +
+  geom_point(data = af_melt[af_melt$Cluster == "InvasiveContemporary" & af_melt$pos %in% ploty,], 
+             aes(x = Long, y = Lat, colour = value_alt), alpha = 0.7, size = 2) +
+  facet_wrap(.~ factor(pos, levels = ploty), ncol = 3) +
+  scale_colour_gradientn(colours= rainbow(10)[1:8], "Allele freq") +
+  theme_bw() + xlim(-10, 40) + 
+  xlab("Longitude") + ylab("Latitude") + 
+  theme(strip.background = element_blank(),
+        strip.text = element_blank()) +
+  geom_text_npc(aes(npcx = 1, npcy = 1, label = c("c", "a", "d", "e", "b", "f")),
+                hjust = 3, vjust = 2, size = 5,
+                data = distinct(af_melt[af_melt$Cluster == "InvasiveContemporary" & af_melt$pos %in% ploty,], pos))
+
+
+```
+
+
+# Figure 2B
+
+
+```{r}
+## XtX from Baypass -- past pops only
+xtxpast = fread("baypass/XtX_natPast.toPlot.txt", header = TRUE)
+order = fread("baypass/XtX_snpOrder_natPast.toPlot.txt")
+
+xtxpast = cbind(order, xtxpast$M_XtX)
+colnames(xtxpast) <- c("chr", "pos", "xtx")
+xtxpast = xtxpast[!xtxpast$chr == "Chr0",]
+
+## get significant zones only
+x1p = xtxpast[xtxpast$chr == "Chr1" & xtxpast$pos %in% unlist(sigZones[sigZones$chr == "Chr1", "V2"]),]
+x2p = xtxpast[xtxpast$chr == "Chr2" & xtxpast$pos %in% unlist(sigZones[sigZones$chr == "Chr2", "V2"]),]
+x3p = xtxpast[xtxpast$chr == "Chr3" & xtxpast$pos %in% unlist(sigZones[sigZones$chr == "Chr3", "V2"]),]
+x4p = xtxpast[xtxpast$chr == "Chr4" & xtxpast$pos %in% unlist(sigZones[sigZones$chr == "Chr4", "V2"]),]
+x5p = xtxpast[xtxpast$chr == "Chr5" & xtxpast$pos %in% unlist(sigZones[sigZones$chr == "Chr5", "V2"]),]
+x6p = xtxpast[xtxpast$chr == "Chr6" & xtxpast$pos %in% unlist(sigZones[sigZones$chr == "Chr6", "V2"]),]
+x7p = xtxpast[xtxpast$chr == "Chr7" & xtxpast$pos %in% unlist(sigZones[sigZones$chr == "Chr7", "V2"]),]
+
+xtxpast_sig = rbind(x1p, x2p, x3p, x4p, x5p, x6p, x7p)
+
+## stats for plotting
+xtxs_med = median(xtxpast$xtx)
+xtxs_sd = sd(xtxpast$xtx)
+xxxmed = median(xtxpast_sig$xtx)
+xxxsd = sd(xtxpast_sig$xtx) 
+
+## plotting
+ggplot() +
+  geom_density(data = xtxpast, aes(xtx), colour = "grey") +
+  geom_density(data = xtxpast_sig, aes(xtx)) +
+  geom_errorbarh(aes(xmax = as.numeric(xtxs_med+xtxs_sd), xmin = xtxs_med-xtxs_sd, height = 0, y = 0), colour = "grey") +
+  geom_point(aes(x = xtxs_med, y = 0), colour = "grey", size = 2) +
+  geom_errorbarh(aes(xmax = xxxmed+xxxsd, xmin = xxxmed-xxxsd, height = 0, y = 0.02)) +
+  geom_point(aes(x = xxxmed, y = 0.02), size = 4, shape = 18) +
+  theme_classic() + ylab("density")
+
+## stats
+ks.test(xtxpast$xtx, xtxpast_sig$xtx, alternative = "greater")
+```
+
+
+# Figure 3C
+
+
+```{r}
+## swap allele freqs to alternative allele 
+af_melt$value_alt <- 1 - af_melt$value
+
+## edit
+af_melt$time <- ifelse(af_melt$Cluster == "InvasiveContemporary" | af_melt$Cluster == "NativeContemporary", "Contemporary", "Past")
+af_melt$cat <- ifelse(af_melt$Survival > 0.8, "Resistant", ifelse(af_melt$Survival <= 0.15, "Susceptible", "intermediate"))
+af_melt$time_space <- paste(af_melt$time, af_melt$cat)
+
+## summarise
+af_melt_mean <- af_melt %>% 
+  group_by(pos, time_space) %>%
+  summarise(mean = mean(value_alt, na.rm = TRUE),
+            sd = sd(value_alt, na.rm = TRUE),
+            var = var(value_alt, na.rm = TRUE),
+            min = min(value_alt, na.tm = TRUE),
+            max = max(value_alt, na.rm = TRUE), 
+            median = median(value_alt, na.rm = TRUE))
+
+
+
+## add effect sizes (betas)
+af_melt_mean = merge(af_melt_mean, unique(sigZones[, c("V2", "Beta_is")]), by.x = "pos", by.y = "V2")
+
+
+## plotting
+ggplot() + 
+  ylab("Mean allele frequency") +
+  
+  geom_point(data = na.omit(af_melt_mean[!af_melt_mean$time_space == "Contemporary intermediate" & af_melt_mean$pos %in% unique(af_melt_mean[(af_melt_mean$time_space == "Past Susceptible" ) & af_melt_mean$mean < 0.1, "pos"]),]),
+             
+       aes(x = factor(time_space, levels = c("Past Susceptible", "Contemporary Susceptible", "Contemporary Resistant")), y = mean, group = pos, colour = -Beta_is), position = position_dodge(0.4), shape = 23) + 
+  
+    geom_line(data = na.omit(af_melt_mean[(!af_melt_mean$time_space == "Contemporary intermediate") & af_melt_mean$pos %in% unique(af_melt_mean[(af_melt_mean$time_space == "Past Susceptible" ) & af_melt_mean$mean < 0.1, "pos"]),]),
+              
+       aes(x = factor(time_space, levels = c("Past Susceptible", "Contemporary Susceptible", "Contemporary Resistant")), y = mean, group = pos, colour = -Beta_is), position = position_dodge(0.4), linetype = 2) + 
+  
+  geom_point(data = na.omit(af_melt_mean[(!af_melt_mean$time_space == "Contemporary intermediate") & !af_melt_mean$pos %in% unique(af_melt_mean[(af_melt_mean$time_space == "Past Susceptible" ) & af_melt_mean$mean < 0.1, "pos"]),]),
+             
+       aes(x = factor(time_space, levels = c("Past Susceptible", "Contemporary Susceptible", "Contemporary Resistant")), y = mean, group = pos, colour = -Beta_is), position = position_dodge(0.4)) + 
+  
+    geom_line(data = na.omit(af_melt_mean[(!af_melt_mean$time_space == "Contemporary intermediate") & !af_melt_mean$pos %in% unique(af_melt_mean[(af_melt_mean$time_space == "Past Susceptible" ) & af_melt_mean$mean < 0.1, "pos"]),]),
+              
+       aes(x = factor(time_space, levels = c("Past Susceptible", "Contemporary Susceptible", "Contemporary Resistant")), y = mean, group = pos, colour = -Beta_is), position = position_dodge(0.4)) + 
+  
+  scale_color_gradient2(low="blue", mid="grey", high="red", name = "Beta") + 
+  scale_x_discrete(labels = c("Contemporary Resistant" = "Contemporary\nResistant", "Past Susceptible" = "Past\nSusceptible", "Contemporary Susceptible" = "Contemporary\nSusceptible"), drop = TRUE) +
+  theme_classic() + theme(axis.title.x = element_blank(), legend.position = "bottom")
+
+
+###### stats
+## percentage of loci at > 10% in past
+(length(unique(af_melt_mean$pos)) - length(unique(af_melt_mean[af_melt_mean$time_space == "Past Susceptible" & af_melt_mean$mean < 0.1, "pos"]))) / length(unique(af_melt_mean$pos)) * 100
+
+
+## average freq of rare mutations in the past
+mean(af_melt_mean[af_melt_mean$time_space == "Past Susceptible" & af_melt_mean$mean <= 0.1, "mean"])
+
+## non-rare in past
+nrpast = unique(af_melt_mean[af_melt_mean$time_space == "Past Susceptible" & af_melt_mean$mean > 0.1, "pos"])
+
+## average freq of the other non-rare mutations in the past
+mean(af_melt_mean[af_melt_mean$time_space == "Past Susceptible" & af_melt_mean$pos %in% nrpast, "mean"])
+
+## rare
+rare = af_melt_mean[af_melt_mean$time_space == "Past Susceptible" & af_melt_mean$mean <= 0.1,]
+
+
+## stats
+cs = af_melt_mean[af_melt_mean$time_space == "Contemporary Susceptible",]
+cs = cs[order(cs$pos),]
+cr = af_melt_mean[af_melt_mean$time_space == "Contemporary Resistant",]
+cr = cr[order(cr$pos),]
+ps = af_melt_mean[af_melt_mean$time_space == "Past Susceptible",]
+ps = ps[order(ps$pos),]
+
+##### contemporary susceptible - contemporary resistant
+cscr = merge(cs, cr, by = "pos")
+cscr$change = cscr$mean.x - cscr$mean.y
+
+af_melt_mean = merge(af_melt_mean, cscr[, c("pos", "change")], by = "pos")
+
+names(af_melt_mean)[names(af_melt_mean) == "change"] <- "change_CSCR"
+
+#### contemporary susceptible - past susceptible
+csps = merge(cs, ps, by = "pos")
+csps$change = csps$mean.x - csps$mean.y
+
+af_melt_mean = merge(af_melt_mean, csps[, c("pos", "change")], by = "pos")
+
+names(af_melt_mean)[names(af_melt_mean) == "change"] <- "change_CSPS"
+
+
+
+#### tests
+ks.test(abs(af_melt_mean[!(af_melt_mean$pos %in% rare$pos), "change_CSPS"]), abs(af_melt_mean[!(af_melt_mean$pos %in% rare$pos), "change_CSCR"]), alternative = "greater")
+
+ks.test(abs(af_melt_mean[(af_melt_mean$pos %in% rare$pos), "change_CSPS"]), abs(af_melt_mean[(af_melt_mean$pos %in% rare$pos), "change_CSCR"]), alternative = "greater")
+
+
+```
+
+
+# Figure 3D
+
+
+```{r}
+## plotting
+ggplot() +
+  geom_density(data = af_melt_mean, aes(abs(change_CSPS)), colour = cbPalette[4]) +
+  geom_density(data = af_melt_mean, aes(abs(change_CSCR)), colour = cbPalette[7]) +
+  
+  geom_errorbarh(aes(xmax = median(abs(pscs))+sd(abs(pscs)), xmin = median(abs(pscs))-sd(abs(pscs)), y = 0.2), height = 0, colour = cbPalette[4]) +
+  geom_point(aes(x = mean(abs(pscs)), y = 0.2), colour = cbPalette[4], size = 2) +
+  
+  geom_errorbarh(aes(xmax = median(abs(cscr_p))+sd(abs(cscr_p)), xmin = median(abs(cscr_p))-sd(abs(cscr_p)), y = 0.5), height = 0, colour = cbPalette[7]) +
+  geom_point(aes(x = mean(abs(cscr_p)), y = 0.5), size = 4, colour = cbPalette[7], shape = 18) +  
+  
+  theme_classic() + xlab("abs(AF differences)") + ylab("density")
+
+```
+
+
+
+# Supp Fig 8A
+
+
+```{r}
+## XtX from BayPas
+xtxs = fread("XtXs_allchrs_withPvalues_June25.txt", header = TRUE)
+
+x1x = xtx1[xtx1$V2 %in% unlist(sigZones[sigZones$chr == "chr1", "V2"]),]
+x2x = xtx2[xtx2$V2 %in% unlist(sigZones[sigZones$chr == "chr2", "V2"]),]
+x3x = xtx3[xtx3$V2 %in% unlist(sigZones[sigZones$chr == "chr3", "V2"]),]
+x4x = xtx4[xtx4$V2 %in% unlist(sigZones[sigZones$chr == "chr4", "V2"]),]
+x5x = xtx5[xtx5$V2 %in% unlist(sigZones[sigZones$chr == "chr5", "V2"]),]
+x6x = xtx6[xtx6$V2 %in% unlist(sigZones[sigZones$chr == "chr6", "V2"]),]
+x7x = xtx7[xtx7$V2 %in% unlist(sigZones[sigZones$chr == "chr7", "V2"]),]
+
+xxx = rbind(x4x[, c(8,9,4,7)], x5x[, c(8,9,4,7)], x6x[, c(8,9,4,7)], x7x[, c(8,9,4,7)], x2x[, c(8,9,4,7)], x3x[, c(8,9,4,7)], x1x[, c(8,9,4,7)])
+
+#write.table(x = xxx, file = "XtX_sigZones_withPvalues_June25.txt", quote = FALSE, row.names = FALSE)
+
+
+#xxx = fread("XtX_sigZones_withPvalues_June25.txt", header = TRUE)
+
+
+xtxs_med = median(xtxs$M_XtX)
+xtxs_sd = sd(xtxs$M_XtX)
+xxxmed = median(xxx$M_XtX)
+xxxsd = sd(xxx$M_XtX) 
+  
+## plotting
+ggplot() +
+  geom_density(data = xtxs, aes(M_XtX), colour = "grey") +
+  geom_density(data = xxx, aes(M_XtX)) +
+  geom_errorbarh(aes(xmax = as.numeric(xtxs_med+xtxs_sd), xmin = xtxs_med-xtxs_sd, height = 0, y = 0.1), colour = "grey") +
+  geom_point(aes(x = xtxs_med, y = 0.1), colour = "grey", size = 2) +
+  geom_errorbarh(aes(xmax = xxxmed+xxxsd, xmin = xxxmed-xxxsd, height = 0, y = 0.2)) +
+  geom_point(aes(x = xxxmed, y = 0.2), size = 4, shape = 18) +
+  theme_classic() + ylab("density") + xlab("XtX")
+
+
+## stats
+ks.test(xtxs$M_XtX, xxx$M_XtX, alternative = "greater")
+
+```
+
+
+# Supp Fig 8B
+
+
+```{r}
+## whole genome Fst from ppolfstat
+fst1 = fread("CMH_FST/Fst_window1000.HR48.chr1.txt", header = F)
+fst2 = fread("CMH_FST/Fst_window1000.HR48.chr2.txt", header = F)
+fst3 = fread("CMH_FST/Fst_window1000.HR48.chr3.txt", header = F)
+fst4 = fread("CMH_FST/Fst_window1000.HR48.chr4.txt", header = F)
+fst5 = fread("CMH_FST/Fst_window1000.HR48.chr5.txt", header = F)
+fst6 = fread("CMH_FST/Fst_window1000.HR48.chr6.txt", header = T)
+fst7 = fread("CMH_FST/Fst_window1000.HR48.chr7.txt", header = T)
+
+
+## edits
+fst6$window <- 1:nrow(fst6)
+fst7$window <- 1:nrow(fst7)
+colnames(fst1) <- c("window", "Chr", "Position", "CumulatedPosition", "MultiLocusFst")
+colnames(fst2) <- c("window", "Chr", "Position", "CumulatedPosition", "MultiLocusFst")
+colnames(fst3) <- c("window", "Chr", "Position", "CumulatedPosition", "MultiLocusFst")
+colnames(fst4) <- c("window", "Chr", "Position", "CumulatedPosition", "MultiLocusFst")
+colnames(fst5) <- c("window", "Chr", "Position", "CumulatedPosition", "MultiLocusFst")
+
+fsts = rbind(fst1, fst2, fst3, fst4, fst5, fst6[,c(5,1:4)], fst7[,c(5,1:4)])
+
+
+## get significant zones Fst
+fst1s = fst1[fst1$window %in% unlist(sigZones[sigZones$chr == "chr1", "window"]),]
+fst2s = fst2[fst2$window %in% unlist(sigZones[sigZones$chr == "chr2", "window"]),]
+fst3s = fst3[fst3$window %in% unlist(sigZones[sigZones$chr == "chr3", "window"]),]
+fst4s = fst4[fst4$window %in% unlist(sigZones[sigZones$chr == "chr4", "window"]),]
+fst5s = fst5[fst5$window %in% unlist(sigZones[sigZones$chr == "chr5", "window"]),]
+fst6s = fst6[fst6$window %in% unlist(sigZones[sigZones$chr == "chr6", "window"]),]
+fst7s = fst7[fst7$window %in% unlist(sigZones[sigZones$chr == "chr7", "window"]),]
+
+
+## edits
+fstsig = rbind(fst1s, fst2s, fst3s, fst4s, fst5s, fst6s, fst7s)
+
+xtxs_med_fst = median(fsts$MultiLocusFst, na.rm = TRUE)
+xtxs_sd_fst = sd(fsts$MultiLocusFst, na.rm = TRUE)
+xxxmed_fst = median(fstsig$MultiLocusFst, na.rm = TRUE)
+xxxsd_fst = sd(fstsig$MultiLocusFst, na.rm = TRUE)
+
+
+## plotting
+ggplot() + geom_density(data = fsts, aes(MultiLocusFst), colour = "grey") +
+  geom_density(data = fstsig, aes(MultiLocusFst)) + 
+  geom_errorbarh(aes(xmax = as.numeric(xtxs_med_fst+xtxs_sd_fst), xmin = xtxs_med_fst-xtxs_sd_fst, height = 0, y = 0.5), colour = "grey") +
+  geom_point(aes(x = xtxs_med_fst, y = 0.5), colour = "grey", size = 2) +
+  geom_errorbarh(aes(xmax = xxxmed_fst+xxxsd_fst, xmin = xxxmed_fst-xxxsd_fst, height = 0, y = 1)) +
+  geom_point(aes(x = xxxmed_fst, y = 1), size = 4, shape = 18) + theme_classic() + ylab("density") + xlab("Fst")
+
+
+## stats
+ks.test(fsts$MultiLocusFst, fstsig$MultiLocusFst, alternative = "greater")
+
+
+```
+
+
+# Supp Fig 8C
+
+
+```{r}
+
+## diversity from npstat
+all = fread("npstat_all_output_1M.txt", header = TRUE)
+
+## edits
+all$pop <- gsub(pattern = "Am", replacement = "Am_", all$pop)
+all <- merge(all, pops, by.x = "pop", by.y = "Pop")
+all = all[all$pop %in% unique(acc_geno[acc_geno$Cluster == "InvasiveContemporary", "pop"]),]
+all = all[!all$chr == "chr0",]
+
+all$window <- as.numeric(all$window)
+
+## only significant zones
+sigZones$chr <- gsub(pattern = "Chr", replacement = "chr", x = sigZones$chr)
+
+sigZones$window <- round_any(sigZones$V2, 1000000) / 1000000
+
+sigZones <- merge(sigZones[, -6], all, by = c("chr", "window"))
+          
+
+## plotting
+ggplot() + 
+  geom_density(data = all_cluster, aes(x = mean_W), colour = "grey", alpha = 0.7) + 
+  geom_errorbarh(data = all_cluster, aes(xmax = median(mean_W) + sd(mean_W), xmin = median(mean_W) - sd(mean_W), height = 0, y = 5), colour = "grey") +
+  geom_point(data = all_cluster, aes(x = median(mean_W), y = 5), colour = "grey", size = 2) +
+  geom_density(data = na.omit(sigZones), aes(x = mean_W)) +
+  geom_errorbarh(data = na.omit(sigZones), aes(xmax = median(mean_W) + sd(mean_W), xmin = median(mean_W) - sd(mean_W), height = 0, y = 10)) +
+  geom_point(data = na.omit(sigZones), aes(x = median(mean_W), y = 10), size = 4, shape = 18) +
+  theme_classic() + xlab("Watterson theta per window") + ylab("density")
+
+```
+
+
+# Figure 4
+
+
+```{r}
+## load sync file in R using poolfstat package
+load("/Volumes/kqw596/From_SCIENCE/poolfstat_supermega_65_chr3_all.RData")
+
+## get coverage per position on chr 3
+cov = as.data.frame(pool@readcoverage)
+cov = cbind(as.data.frame(pool@snp.info), cov)
+
+## get matches to the ref  
+ref = as.data.frame(pool@refallele.readcount)
+ref = cbind(as.data.frame(pool@snp.info), ref)
+
+## calculate AF of the ref allele for all pos in chr 3
+ref_freq = ref[, 5:ncol(ref)] / cov[, 5:ncol(cov)]
+ref_freq = cbind(as.data.frame(pool@snp.info), ref_freq)
+
+## mean per 1kb windows
+cov_mean = cov %>% 
+  mutate(Position_bin = floor(Position / 1000) * 1000) %>%
+  group_by(Chromosome, Position_bin) %>%
+  summarise(across(where(is.numeric), mean, na.rm = TRUE), .groups = "drop")
+
+colnames(cov_mean) <- c("Chromosome", "Position_bin", "Position", pool@poolnames)
+
+
+## pop means
+pop_mean_cov = as.data.frame(colMeans(cov_mean[, 4:ncol(cov_mean)]))
+pop_mean_cov$pop <- rownames(pop_mean_cov)
+colnames(pop_mean_cov) <- c("mean_pop", "pop")
+
+
+## target and edits
+cov_mean_target = cov_mean[cov_mean$Position_bin > 237000000 & cov_mean$Position_bin < 238000000,]
+
+cov_mean_target_melt = reshape2::melt(cov_mean_target, id.vars = c("Chromosome", "Position_bin", "Position"))
+
+cov_mean_target_melt = merge(cov_mean_target_melt, survival180[,1:3], by.x = "variable", by.y = "Pop")
+
+cov_mean_target_melt <- merge(cov_mean_target_melt, pop_mean_cov, by.x = "variable", by.y = "pop", all.x = TRUE)
+cov_mean_target_melt$ratio <- cov_mean_target_melt$value / cov_mean_target_melt$mean_pop
+
+pos = unique(af_melt[af_melt$Chr == "Chr3" & af_melt$pos < 238000000, "pos"])
+
+
+## plotting
+ggplot() +
+  geom_vline(xintercept = pos, linetype = 2, colour = "red") +
+  geom_gene_arrow(aes(xmin = c(237178003, 237180437, 237184142, 237335223, 237628944), xmax = c(237178804, 237181254, 237184949, 237335992, 237629705), y = 120), fill = "aquamarine", arrowhead_height = unit(3, "mm"), arrowhead_width = unit(1, "mm"), forward = FALSE) +
+  geom_gene_arrow(aes(xmin = c(237172781,237167713), xmax = c(237177322,237171353), y = 120), fill = "aquamarine", colour = "white", arrowhead_height = unit(3, "mm"), arrowhead_width = unit(1, "mm")) +
+  geom_hline(yintercept = c(meanchr3), linetype = 2) +
+  geom_line(data = cov_mean_target_melt, 
+            aes(x = Position_bin, y = value, group = variable, colour = Survival), span = 0.1, linewidth = 0.3) +
+  xlim(237170000, 237190000) +
+  scale_color_gradientn(colours = cbPalette[c(4,5,2,7)]) +
+  geom_point(data = lind, aes(x = pos, y = lindley)) +
+  theme_bw() + theme(panel.grid = element_blank()) +
+  xlab("Genomic position") + ylab("value")
+
+
+```
+
+
+# Figure 4C
+
+
+```{r}
+## plotting
+ggplot() + 
+  geom_polygon(data = europe_map, aes(x=long, y=lat, group=group),
+               color="grey80", fill="grey80" ) + 
+  theme_bw() +
+  geom_point(data = na.omit(cov_mean_target_melt[cov_mean_target_melt$Position_bin == 237184000,]), 
+             aes(x = Long, y = Lat, colour = Survival, fill = Survival, size = ratio), shape = 21) +
+  scale_color_gradientn(colours = (cbPalette[c(4,5,2,7)])) +
+  scale_fill_gradientn(colours = alpha(cbPalette[c(4,5,2,7)], 0.4)) + guides(fill = "none", colour = "none") +
+  scale_size_continuous("Ratio") +
+  xlab("Longitude") + ylab("Latitude")
+
+
+```
+
+
+# Supp Fig 10
+
+
+```{r}
+## plotting
+ggplot(cov_mean_target_melt[cov_mean_target_melt$Position_bin >= 237175000 & cov_mean_target_melt$Position_bin <= 237185000,], 
+       aes(x = ratio, y = Survival)) + 
+  geom_point() + 
+  stat_cor(label.x = 5, label.y = 0.5, method = "pearson") + 
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_color_gradientn(colours = rainbow(10)[1:8]) + 
+  facet_wrap(.~Position_bin) + theme_bw() + ylim(0,1)
+
+
+```
+
+
+
